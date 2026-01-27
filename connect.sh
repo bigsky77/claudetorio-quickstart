@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
 # Configuration - UPDATE THIS
@@ -19,11 +19,12 @@ echo -e "${NC}"
 
 # Check dependencies
 command -v curl >/dev/null 2>&1 || { echo -e "${RED}Error: curl is required${NC}"; exit 1; }
-command -v jq >/dev/null 2>&1 || { echo -e "${RED}Error: jq is required. Install with: sudo apt install jq${NC}"; exit 1; }
+command -v jq >/dev/null 2>&1 || { echo -e "${RED}Error: jq is required. Install with: brew install jq (Mac) or sudo apt install jq (Linux)${NC}"; exit 1; }
 
 # Check for FLE (factorio-learning-environment)
 FLE_CMD=""
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Get script directory - works in bash/zsh, handles symlinks
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 check_fle() {
     # Always use our custom wrapper for remote server support
@@ -193,9 +194,29 @@ if echo "$SAVES" | jq -e 'type == "array"' > /dev/null 2>&1; then
     SAVE_COUNT=$(echo "$SAVES" | jq 'length')
     if [ "$SAVE_COUNT" -gt "0" ]; then
         echo -e "${GREEN}Found ${SAVE_COUNT} save(s):${NC}"
-        echo "$SAVES" | jq -r '.[] | "  -> \(.save_name) (score: \(.score_at_save // 0 | floor), \(.playtime_hours // 0 | floor)h played)"'
         echo ""
-        read -p "Enter save name to resume (or press Enter for new game): " SAVE_NAME
+
+        # Display numbered list of saves
+        i=1
+        while read -r save_info; do
+            echo -e "  ${BLUE}[$i]${NC} $save_info"
+            i=$((i + 1))
+        done < <(echo "$SAVES" | jq -r '.[] | "\(.save_name) (score: \(.score_at_save // 0 | floor), \(.playtime_hours // 0 | floor)h played)"')
+
+        echo -e "  ${BLUE}[0]${NC} Start new game"
+        echo ""
+        read -p "Select save number (0 for new game): " SAVE_CHOICE
+
+        # Validate input and get save name
+        if [ -n "$SAVE_CHOICE" ] && [ "$SAVE_CHOICE" != "0" ]; then
+            # Check if input is a valid number
+            if [[ "$SAVE_CHOICE" =~ ^[0-9]+$ ]] && [ "$SAVE_CHOICE" -ge 1 ] && [ "$SAVE_CHOICE" -le "$SAVE_COUNT" ]; then
+                SAVE_NAME=$(echo "$SAVES" | jq -r ".[$((SAVE_CHOICE - 1))].save_name")
+                echo -e "${GREEN}Selected: ${SAVE_NAME}${NC}"
+            else
+                echo -e "${YELLOW}Invalid selection, starting new game${NC}"
+            fi
+        fi
     else
         echo "No existing saves found. Starting fresh!"
     fi
@@ -272,4 +293,4 @@ echo ""
 # Auto-launch Claude Code with the MCP config and welcome message
 echo -e "${GREEN}Launching Claude Code...${NC}"
 echo ""
-exec claude --mcp-config mcp-config.json "Welcome me to Claudetorio and give a brief orientation, then render the current factory view to get started."
+exec claude --mcp-config mcp-config.json -p "Welcome me to Claudetorio and give a brief orientation, then render the current factory view to get started."
