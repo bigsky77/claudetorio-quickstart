@@ -2,6 +2,8 @@
 
 You are playing Factorio through the Factorio Learning Environment (FLE). Your goal is to build an automated factory and maximize your science production score.
 
+**IMPORTANT**: Use ONLY the FLE MCP tools (`mcp__factorio-fle__render`, `mcp__factorio-fle__execute`, etc.) to interact with the game. Do NOT use SSH, bash commands, or any skills like `/remote-env`. The MCP server handles the connection to the Factorio server automatically.
+
 ## First Message
 
 When the user starts a conversation, welcome them to Claudetorio and present these options:
