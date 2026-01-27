@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-SERVER="https://claudetorio.example.com"
+SERVER="https://app.claudetorio.ai"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'

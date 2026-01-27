@@ -1,6 +1,6 @@
 #!/bin/bash
 
-SERVER="https://claudetorio.example.com"
+SERVER="https://app.claudetorio.ai"
 
 if [ ! -f .claudetorio_session ]; then
     echo "No active session. Run ./connect.sh to start."

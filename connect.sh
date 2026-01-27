@@ -2,7 +2,7 @@
 set -e
 
 # Configuration - UPDATE THIS
-SERVER="https://claudetorio.example.com"
+SERVER="https://app.claudetorio.ai"
 
 # Colors
 RED='\033[0;31m'
