@@ -58,8 +58,8 @@ FLE_RCON_PASSWORD="${FLE_RCON_PASSWORD:-factorio}"
 if [ ! -d "$FLE_VENV" ] || [ ! -f "$FLE_VENV/bin/python3" ]; then
     echo "Installing FLE dependencies (first run only)..." >&2
 
-    # Detect NixOS
-    if [ -f /etc/NIXOS ] || [ -d /nix/store ]; then
+    # Use nix-shell only if on NixOS AND nix-shell is available
+    if [ -f /etc/NIXOS ] && command -v nix-shell >/dev/null 2>&1; then
         nix-shell -p python312 --run "
             python3 -m venv $FLE_VENV
             $FLE_VENV/bin/pip install --quiet 'factorio-learning-environment[mcp,eval]' 'fastmcp<2.0' openai anthropic aiohttp
@@ -70,8 +70,8 @@ if [ ! -d "$FLE_VENV" ] || [ ! -f "$FLE_VENV/bin/python3" ]; then
     fi
 fi
 
-# Handle NixOS library path
-if [ -f /etc/NIXOS ] || [ -d /nix/store ]; then
+# Handle NixOS library path (only on actual NixOS)
+if [ -f /etc/NIXOS ] && command -v nix-build >/dev/null 2>&1; then
     LIBCXX=$(nix-build '<nixpkgs>' -A stdenv.cc.cc.lib --no-out-link 2>/dev/null)/lib
     export LD_LIBRARY_PATH="$LIBCXX:$LD_LIBRARY_PATH"
 fi
