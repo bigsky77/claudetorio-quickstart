@@ -112,6 +112,15 @@ sys.modules['fle.cluster.run_envs'] = MockRunEnvs()
 
 # Now run the actual FLE command
 if len(sys.argv) > 1 and sys.argv[1] == 'mcp':
+    # Import tool modules to register them with @mcp.tool() decorators
+    from fle.env.protocols._mcp import tools
+    from fle.env.protocols._mcp import version_control
+    from fle.env.protocols._mcp import prompts
+    # Resources module has FastMCP version incompatibility, skip if it fails
+    try:
+        from fle.env.protocols._mcp import resources
+    except TypeError:
+        pass
     from fle.env.protocols._mcp import mcp
     mcp.run(transport="stdio")
 else:
