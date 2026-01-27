@@ -259,9 +259,12 @@ echo "$SESSION_ID" > .claudetorio_session
 # Generate Claude Code MCP config with correct FLE path
 mkdir -p .claude
 
+# Rename server from "factorio" to "factorio-fle" for correct MCP tool naming
+MCP_CONFIG=$(echo "$MCP_CONFIG" | jq '.mcpServers["factorio-fle"] = .mcpServers.factorio | del(.mcpServers.factorio)')
+
 # Update the MCP config to use our FLE path if it's not the default 'fle'
 if [ "$FLE_CMD" != "fle" ]; then
-    MCP_CONFIG=$(echo "$MCP_CONFIG" | jq --arg cmd "$FLE_CMD" '.mcpServers.factorio.command = $cmd')
+    MCP_CONFIG=$(echo "$MCP_CONFIG" | jq --arg cmd "$FLE_CMD" '.mcpServers["factorio-fle"].command = $cmd')
 fi
 
 echo "$MCP_CONFIG" > .claude/settings.json
