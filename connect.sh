@@ -126,6 +126,16 @@ FLEWRAPPER
     chmod +x "$SCRIPT_DIR/.venv/bin/fle"
     FLE_CMD="$SCRIPT_DIR/.venv/bin/fle"
     echo -e "${GREEN}FLE wrapper created${NC}"
+
+    # Pre-install dependencies so MCP server starts quickly
+    FLE_VENV="$HOME/.fle-venv"
+    if [ ! -d "$FLE_VENV" ] || [ ! -f "$FLE_VENV/bin/python3" ]; then
+        echo -e "${YELLOW}Installing dependencies (first time only, may take a minute)...${NC}"
+        python3 -m venv "$FLE_VENV"
+        "$FLE_VENV/bin/pip" install --quiet 'factorio-learning-environment[mcp,eval]' 'fastmcp<2.0' openai anthropic aiohttp
+        echo -e "${GREEN}Dependencies installed${NC}"
+    fi
+
     return 0
 }
 
