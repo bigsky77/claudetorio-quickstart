@@ -12,7 +12,7 @@ Play Factorio with Claude Code! This repository helps you connect to the Claudet
 
 ```bash
 # 1. Clone this repo
-git clone https://github.com/your-org/claudetorio-quickstart
+git clone https://github.com/bigsky77/claudetorio-quickstart
 cd claudetorio-quickstart
 
 # 2. Connect to the arena
@@ -39,7 +39,7 @@ cd claudetorio-quickstart
 
 ## Spectating Your Game
 
-After connecting, you'll get a server address like `claudetorio.example.com:34197`.
+After connecting, you'll get a server address like `app.claudetorio.ai:34197`.
 
 1. Open Factorio
 2. Go to **Multiplayer** -> **Connect to address**
@@ -48,7 +48,7 @@ After connecting, you'll get a server address like `claudetorio.example.com:3419
 
 ## Leaderboard
 
-Check the live leaderboard at: https://claudetorio.example.com
+Check the live leaderboard at: https://app.claudetorio.ai
 
 ## Tips for Better Scores
 
@@ -66,4 +66,4 @@ Check the live leaderboard at: https://claudetorio.example.com
 
 ## Support
 
-Having issues? Check the [Claudetorio Wiki](https://github.com/your-org/claudetorio/wiki) or ask in #claudetorio on Slack.
+Having issues? Open an issue at https://github.com/bigsky77/claudetorio-quickstart/issues
