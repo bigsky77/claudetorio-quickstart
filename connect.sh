@@ -269,7 +269,7 @@ echo -e "${YELLOW}  LEADERBOARD: ${BLUE}${SERVER}${NC}"
 echo -e "${YELLOW}  TO SAVE & DISCONNECT: ${BLUE}./disconnect.sh${NC}"
 echo ""
 
-# Auto-launch Claude Code with the MCP config
+# Auto-launch Claude Code with the MCP config and welcome message
 echo -e "${GREEN}Launching Claude Code...${NC}"
 echo ""
-exec claude --mcp-config mcp-config.json
+exec claude --mcp-config mcp-config.json --prompt "Welcome me to Claudetorio and give a brief orientation, then render the current factory view to get started."
