@@ -23,6 +23,24 @@ command -v curl >/dev/null 2>&1 || { echo -e "${RED}Error: curl is required${NC}
 command -v jq >/dev/null 2>&1 || { echo -e "${RED}Error: jq is required. Install with: sudo apt install jq${NC}"; exit 1; }
 command -v python3 >/dev/null 2>&1 || { echo -e "${RED}Error: python3 is required${NC}"; exit 1; }
 
+# Detect NixOS and find libstdc++ path
+detect_nixos_libpath() {
+    if [ -d "/nix/store" ]; then
+        # We're on NixOS - find a 64-bit libstdc++
+        for lib in /nix/store/*gcc*-lib/lib/libstdc++.so.6; do
+            if [ -f "$lib" ]; then
+                # Test if this library works with our python
+                LIB_DIR=$(dirname "$lib")
+                if LD_LIBRARY_PATH="$LIB_DIR" python3 -c "import ctypes; ctypes.CDLL('libstdc++.so.6')" 2>/dev/null; then
+                    echo "$LIB_DIR"
+                    return 0
+                fi
+            fi
+        done
+    fi
+    echo ""
+}
+
 # Setup Python virtual environment and install FLE
 setup_fle() {
     echo -e "${YELLOW}Setting up Factorio Learning Environment...${NC}"
@@ -36,13 +54,20 @@ setup_fle() {
     # Activate venv
     source .venv/bin/activate
 
+    # Detect NixOS library path (needed for numpy)
+    NIXOS_LIB_PATH=$(detect_nixos_libpath)
+    if [ -n "$NIXOS_LIB_PATH" ]; then
+        echo -e "${YELLOW}Detected NixOS - using libstdc++ from: ${NIXOS_LIB_PATH}${NC}"
+        export LD_LIBRARY_PATH="$NIXOS_LIB_PATH:$LD_LIBRARY_PATH"
+    fi
+
     # Check if FLE is installed and has remote support
     if python3 -c "from fle.env.protocols._mcp import mcp; import os; os.environ['FLE_SERVER_HOST']='test'" 2>/dev/null; then
         echo -e "${GREEN}FLE with MCP support is installed${NC}"
     else
         echo "Installing FLE from Claudetorio fork..."
         pip install --upgrade pip wheel >/dev/null 2>&1
-        pip install fastmcp 2>&1 | tail -3
+        pip install fastmcp dulwich 2>&1 | tail -3
         pip install "${FLE_REPO}" 2>&1 | tail -5
         echo -e "${GREEN}FLE installed successfully${NC}"
     fi
@@ -144,6 +169,13 @@ echo "$SESSION_ID" > .claudetorio_session
 VENV_PYTHON="$(pwd)/.venv/bin/python"
 MCP_CONFIG=$(echo "$MCP_CONFIG" | jq --arg py "$VENV_PYTHON" '.mcpServers["factorio-fle"].command = $py')
 
+# Add LD_LIBRARY_PATH for NixOS if needed
+NIXOS_LIB_PATH=$(detect_nixos_libpath)
+if [ -n "$NIXOS_LIB_PATH" ]; then
+    echo -e "${YELLOW}Adding NixOS library path to MCP config...${NC}"
+    MCP_CONFIG=$(echo "$MCP_CONFIG" | jq --arg ldpath "$NIXOS_LIB_PATH" '.mcpServers["factorio-fle"].env.LD_LIBRARY_PATH = $ldpath')
+fi
+
 mkdir -p .claude
 echo "$MCP_CONFIG" > .claude/settings.json
 
@@ -158,6 +190,10 @@ FLE_RCON_PORT=$(echo "$MCP_CONFIG" | jq -r '.mcpServers["factorio-fle"].env.FLE_
 FLE_RCON_PASSWORD=$(echo "$MCP_CONFIG" | jq -r '.mcpServers["factorio-fle"].env.FLE_RCON_PASSWORD')
 
 export FLE_SERVER_HOST FLE_RCON_PORT FLE_RCON_PASSWORD
+# Set LD_LIBRARY_PATH for NixOS if needed
+if [ -n "$NIXOS_LIB_PATH" ]; then
+    export LD_LIBRARY_PATH="$NIXOS_LIB_PATH:$LD_LIBRARY_PATH"
+fi
 if $VENV_PYTHON -c "from fle.env.protocols._mcp import mcp; print('MCP module loaded successfully')" 2>&1; then
     echo -e "${GREEN}MCP server ready!${NC}"
 else
