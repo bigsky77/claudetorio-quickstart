@@ -23,17 +23,32 @@ command -v curl >/dev/null 2>&1 || { echo -e "${RED}Error: curl is required${NC}
 command -v jq >/dev/null 2>&1 || { echo -e "${RED}Error: jq is required. Install with: sudo apt install jq${NC}"; exit 1; }
 command -v python3 >/dev/null 2>&1 || { echo -e "${RED}Error: python3 is required${NC}"; exit 1; }
 
-# Detect NixOS and find libstdc++ path
+# Detect NixOS and find libstdc++ path with matching architecture
 detect_nixos_libpath() {
     if [ -d "/nix/store" ]; then
-        # We're on NixOS - find a 64-bit libstdc++
+        # Determine Python's architecture (32 or 64 bit)
+        PYTHON_BITS=$(python3 -c "import struct; print(struct.calcsize('P') * 8)")
+
         for lib in /nix/store/*gcc*-lib/lib/libstdc++.so.6; do
             if [ -f "$lib" ]; then
-                # Test if this library works with our python
-                LIB_DIR=$(dirname "$lib")
-                if LD_LIBRARY_PATH="$LIB_DIR" python3 -c "import ctypes; ctypes.CDLL('libstdc++.so.6')" 2>/dev/null; then
-                    echo "$LIB_DIR"
-                    return 0
+                # Check ELF header: byte 5 (index 4) indicates class
+                # 0x01 = 32-bit (ELFCLASS32), 0x02 = 64-bit (ELFCLASS64)
+                ELF_CLASS=$(od -An -tx1 -j4 -N1 "$lib" 2>/dev/null | tr -d ' ')
+
+                # Match library architecture to Python architecture
+                if [[ "$PYTHON_BITS" == "64" && "$ELF_CLASS" == "02" ]] || \
+                   [[ "$PYTHON_BITS" == "32" && "$ELF_CLASS" == "01" ]]; then
+                    LIB_DIR=$(dirname "$lib")
+                    # Verify the library can be loaded and used (not just opened)
+                    if LD_LIBRARY_PATH="$LIB_DIR" python3 -c "
+import ctypes
+lib = ctypes.CDLL('libstdc++.so.6')
+# Try to access a symbol to verify the library is actually usable
+getattr(lib, '__cxa_demangle', None)
+" 2>/dev/null; then
+                        echo "$LIB_DIR"
+                        return 0
+                    fi
                 fi
             fi
         done
