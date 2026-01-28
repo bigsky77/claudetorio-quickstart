@@ -2,3 +2,4 @@
 mcp-config.json
 .claude/settings.json
 .venv/
+run-mcp.sh

@@ -164,17 +164,37 @@ MCP_CONFIG=$(echo "$RESPONSE" | jq '.mcp_config')
 # Save session info
 echo "$SESSION_ID" > .claudetorio_session
 
-# Generate Claude Code MCP config - use .venv python
-# Update the MCP config to use the venv's python
+# Generate Claude Code MCP config
 VENV_PYTHON="$(pwd)/.venv/bin/python"
-MCP_CONFIG=$(echo "$MCP_CONFIG" | jq --arg py "$VENV_PYTHON" '.mcpServers["factorio-fle"].command = $py')
+SCRIPT_DIR="$(pwd)"
 
-# Add LD_LIBRARY_PATH for NixOS if needed
+# Detect NixOS library path
 NIXOS_LIB_PATH=$(detect_nixos_libpath)
+
+# Create wrapper script for MCP server (handles NixOS library path)
+cat > run-mcp.sh << 'WRAPPER_EOF'
+#!/usr/bin/env bash
+# Auto-generated wrapper script for FLE MCP server
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WRAPPER_EOF
+
+# Add NixOS-specific library path if detected
 if [ -n "$NIXOS_LIB_PATH" ]; then
-    echo -e "${YELLOW}Adding NixOS library path to MCP config...${NC}"
-    MCP_CONFIG=$(echo "$MCP_CONFIG" | jq --arg ldpath "$NIXOS_LIB_PATH" '.mcpServers["factorio-fle"].env.LD_LIBRARY_PATH = $ldpath')
+    echo -e "${YELLOW}Detected NixOS - creating wrapper with library path...${NC}"
+    cat >> run-mcp.sh << NIXOS_EOF
+# NixOS library path (machine-specific)
+export LD_LIBRARY_PATH="$NIXOS_LIB_PATH:\$LD_LIBRARY_PATH"
+NIXOS_EOF
 fi
+
+cat >> run-mcp.sh << 'WRAPPER_EOF'
+exec "$SCRIPT_DIR/.venv/bin/python" -m fle.env.protocols._mcp "$@"
+WRAPPER_EOF
+
+chmod +x run-mcp.sh
+
+# Update MCP config to use wrapper script
+MCP_CONFIG=$(echo "$MCP_CONFIG" | jq --arg cmd "$SCRIPT_DIR/run-mcp.sh" '.mcpServers["factorio-fle"].command = $cmd | .mcpServers["factorio-fle"].args = []')
 
 mkdir -p .claude
 echo "$MCP_CONFIG" > .claude/settings.json
@@ -190,11 +210,8 @@ FLE_RCON_PORT=$(echo "$MCP_CONFIG" | jq -r '.mcpServers["factorio-fle"].env.FLE_
 FLE_RCON_PASSWORD=$(echo "$MCP_CONFIG" | jq -r '.mcpServers["factorio-fle"].env.FLE_RCON_PASSWORD')
 
 export FLE_SERVER_HOST FLE_RCON_PORT FLE_RCON_PASSWORD
-# Set LD_LIBRARY_PATH for NixOS if needed
-if [ -n "$NIXOS_LIB_PATH" ]; then
-    export LD_LIBRARY_PATH="$NIXOS_LIB_PATH:$LD_LIBRARY_PATH"
-fi
-if $VENV_PYTHON -c "from fle.env.protocols._mcp import mcp; print('MCP module loaded successfully')" 2>&1; then
+# Test using the wrapper script
+if ./run-mcp.sh </dev/null 2>&1 | head -5 | grep -q "FastMCP\|MCP server"; then
     echo -e "${GREEN}MCP server ready!${NC}"
 else
     echo -e "${RED}MCP server failed to load. Try reinstalling:${NC}"
