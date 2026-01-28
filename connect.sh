@@ -23,35 +23,63 @@ command -v curl >/dev/null 2>&1 || { echo -e "${RED}Error: curl is required${NC}
 command -v jq >/dev/null 2>&1 || { echo -e "${RED}Error: jq is required. Install with: sudo apt install jq${NC}"; exit 1; }
 command -v python3 >/dev/null 2>&1 || { echo -e "${RED}Error: python3 is required${NC}"; exit 1; }
 
-# Detect NixOS and find libstdc++ path with matching architecture
+# Find a NixOS library with matching architecture
+# Usage: find_nixos_lib "pattern" "libname.so"
+find_nixos_lib() {
+    local pattern="$1"
+    local libname="$2"
+    local PYTHON_BITS=$(python3 -c "import struct; print(struct.calcsize('P') * 8)")
+
+    for lib in /nix/store/${pattern}; do
+        if [ -f "$lib" ]; then
+            # Check ELF header: byte 5 (index 4) indicates class
+            # 0x01 = 32-bit (ELFCLASS32), 0x02 = 64-bit (ELFCLASS64)
+            ELF_CLASS=$(od -An -tx1 -j4 -N1 "$lib" 2>/dev/null | tr -d ' ')
+
+            # Match library architecture to Python architecture
+            if [[ "$PYTHON_BITS" == "64" && "$ELF_CLASS" == "02" ]] || \
+               [[ "$PYTHON_BITS" == "32" && "$ELF_CLASS" == "01" ]]; then
+                echo "$(dirname "$lib")"
+                return 0
+            fi
+        fi
+    done
+    echo ""
+}
+
+# Detect NixOS and find all required library paths
 detect_nixos_libpath() {
     if [ -d "/nix/store" ]; then
-        # Determine Python's architecture (32 or 64 bit)
-        PYTHON_BITS=$(python3 -c "import struct; print(struct.calcsize('P') * 8)")
+        local paths=""
 
-        for lib in /nix/store/*gcc*-lib/lib/libstdc++.so.6; do
-            if [ -f "$lib" ]; then
-                # Check ELF header: byte 5 (index 4) indicates class
-                # 0x01 = 32-bit (ELFCLASS32), 0x02 = 64-bit (ELFCLASS64)
-                ELF_CLASS=$(od -An -tx1 -j4 -N1 "$lib" 2>/dev/null | tr -d ' ')
+        # Find libstdc++ (required for C++ extensions)
+        local gcc_path=$(find_nixos_lib "*gcc*-lib/lib/libstdc++.so.6" "libstdc++.so.6")
+        if [ -n "$gcc_path" ]; then
+            paths="$gcc_path"
+        fi
 
-                # Match library architecture to Python architecture
-                if [[ "$PYTHON_BITS" == "64" && "$ELF_CLASS" == "02" ]] || \
-                   [[ "$PYTHON_BITS" == "32" && "$ELF_CLASS" == "01" ]]; then
-                    LIB_DIR=$(dirname "$lib")
-                    # Verify the library can be loaded and used (not just opened)
-                    if LD_LIBRARY_PATH="$LIB_DIR" python3 -c "
-import ctypes
-lib = ctypes.CDLL('libstdc++.so.6')
-# Try to access a symbol to verify the library is actually usable
-getattr(lib, '__cxa_demangle', None)
-" 2>/dev/null; then
-                        echo "$LIB_DIR"
-                        return 0
+        # Find zlib (required for numpy and many other packages)
+        local zlib_path=$(find_nixos_lib "*/lib/libz.so.1" "libz.so.1")
+        # Filter out FHS environment paths (steam, bottles, etc.) - prefer standalone zlib
+        if [ -z "$zlib_path" ] || [[ "$zlib_path" == *"fhsenv"* ]]; then
+            for lib in /nix/store/*/lib/libz.so.1; do
+                if [[ ! "$lib" == *"fhsenv"* ]] && [ -f "$lib" ]; then
+                    ELF_CLASS=$(od -An -tx1 -j4 -N1 "$lib" 2>/dev/null | tr -d ' ')
+                    PYTHON_BITS=$(python3 -c "import struct; print(struct.calcsize('P') * 8)")
+                    if [[ "$PYTHON_BITS" == "64" && "$ELF_CLASS" == "02" ]] || \
+                       [[ "$PYTHON_BITS" == "32" && "$ELF_CLASS" == "01" ]]; then
+                        zlib_path="$(dirname "$lib")"
+                        break
                     fi
                 fi
-            fi
-        done
+            done
+        fi
+        if [ -n "$zlib_path" ]; then
+            paths="${paths:+$paths:}$zlib_path"
+        fi
+
+        echo "$paths"
+        return 0
     fi
     echo ""
 }
