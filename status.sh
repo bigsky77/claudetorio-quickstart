@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 
 SERVER="https://app.claudetorio.ai"
 

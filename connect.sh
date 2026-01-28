@@ -1,8 +1,9 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -e
 
 # Configuration - UPDATE THIS
 SERVER="https://app.claudetorio.ai"
+FLE_REPO="git+https://github.com/bigsky77/factorio-learning-environment.git"
 
 # Colors
 RED='\033[0;31m'
@@ -19,139 +20,33 @@ echo -e "${NC}"
 
 # Check dependencies
 command -v curl >/dev/null 2>&1 || { echo -e "${RED}Error: curl is required${NC}"; exit 1; }
-command -v jq >/dev/null 2>&1 || { echo -e "${RED}Error: jq is required. Install with: brew install jq (Mac) or sudo apt install jq (Linux)${NC}"; exit 1; }
+command -v jq >/dev/null 2>&1 || { echo -e "${RED}Error: jq is required. Install with: sudo apt install jq${NC}"; exit 1; }
+command -v python3 >/dev/null 2>&1 || { echo -e "${RED}Error: python3 is required${NC}"; exit 1; }
 
-# Check for FLE (factorio-learning-environment)
-FLE_CMD=""
-# Get script directory - works in bash/zsh, handles symlinks
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Setup Python virtual environment and install FLE
+setup_fle() {
+    echo -e "${YELLOW}Setting up Factorio Learning Environment...${NC}"
 
-check_fle() {
-    # Always use our custom wrapper for remote server support
-    if [ -f "$SCRIPT_DIR/.venv/bin/fle" ]; then
-        FLE_CMD="$SCRIPT_DIR/.venv/bin/fle"
-        return 0
+    # Create venv if it doesn't exist
+    if [ ! -d ".venv" ]; then
+        echo "Creating virtual environment..."
+        python3 -m venv .venv
     fi
-    return 1
-}
 
-install_fle() {
-    echo -e "${YELLOW}Setting up FLE (factorio-learning-environment)...${NC}"
+    # Activate venv
+    source .venv/bin/activate
 
-    # Always create our custom wrapper that supports remote connections
-    mkdir -p "$SCRIPT_DIR/.venv/bin"
-
-    # Create the wrapper script
-    cat > "$SCRIPT_DIR/.venv/bin/fle" << 'FLEWRAPPER'
-#!/usr/bin/env bash
-# Custom FLE wrapper with remote server support
-
-set -e
-
-FLE_VENV="$HOME/.fle-venv"
-
-# Read server config from environment
-FLE_SERVER_HOST="${FLE_SERVER_HOST:-127.0.0.1}"
-FLE_RCON_PORT="${FLE_RCON_PORT:-27000}"
-FLE_RCON_PASSWORD="${FLE_RCON_PASSWORD:-factorio}"
-
-# Create venv if it doesn't exist
-if [ ! -d "$FLE_VENV" ] || [ ! -f "$FLE_VENV/bin/python3" ]; then
-    echo "Installing FLE dependencies (first run only)..." >&2
-
-    # Use nix-shell only if on NixOS AND nix-shell is available
-    if [ -f /etc/NIXOS ] && command -v nix-shell >/dev/null 2>&1; then
-        nix-shell -p python312 --run "
-            python3 -m venv $FLE_VENV
-            $FLE_VENV/bin/pip install --quiet 'factorio-learning-environment[mcp,eval]' 'fastmcp<2.0' openai anthropic aiohttp
-        "
+    # Check if FLE is installed and has remote support
+    if python3 -c "from fle.env.protocols._mcp import mcp; import os; os.environ['FLE_SERVER_HOST']='test'" 2>/dev/null; then
+        echo -e "${GREEN}FLE with MCP support is installed${NC}"
     else
-        python3 -m venv "$FLE_VENV"
-        "$FLE_VENV/bin/pip" install --quiet 'factorio-learning-environment[mcp,eval]' 'fastmcp<2.0' openai anthropic aiohttp
+        echo "Installing FLE from Claudetorio fork..."
+        pip install --upgrade pip wheel >/dev/null 2>&1
+        pip install fastmcp 2>&1 | tail -3
+        pip install "${FLE_REPO}" 2>&1 | tail -5
+        echo -e "${GREEN}FLE installed successfully${NC}"
     fi
-fi
-
-# Handle NixOS library path (only on actual NixOS)
-if [ -f /etc/NIXOS ] && command -v nix-build >/dev/null 2>&1; then
-    LIBCXX=$(nix-build '<nixpkgs>' -A stdenv.cc.cc.lib --no-out-link 2>/dev/null)/lib
-    export LD_LIBRARY_PATH="$LIBCXX:$LD_LIBRARY_PATH"
-fi
-
-# Create a Python wrapper that patches FLE for remote connections BEFORE import
-PATCH_SCRIPT=$(cat << PYTHONPATCH
-import os
-import sys
-
-# Get config from environment
-server_host = os.environ.get('FLE_SERVER_HOST', '127.0.0.1')
-rcon_port = int(os.environ.get('FLE_RCON_PORT', '27000'))
-rcon_password = os.environ.get('FLE_RCON_PASSWORD', 'factorio')
-
-# Create a mock module for cluster_ips that returns our config
-class MockClusterIPs:
-    @staticmethod
-    def get_local_container_ips():
-        return [server_host], [rcon_port + 17197], [rcon_port]
-
-# Install our mock before any FLE imports
-sys.modules['fle.commons.cluster_ips'] = MockClusterIPs()
-
-# Also create the run_envs mock with our values
-class MockRunEnvs:
-    START_RCON_PORT = rcon_port
-    START_GAME_PORT = rcon_port + 17197
-    RCON_PASSWORD = rcon_password
-
-    @staticmethod
-    def resolve_state_dir():
-        from pathlib import Path
-        from platformdirs import user_state_dir
-        return Path(user_state_dir("fle"))
-
-sys.modules['fle.cluster.run_envs'] = MockRunEnvs()
-
-# Now run the actual FLE command
-if len(sys.argv) > 1 and sys.argv[1] == 'mcp':
-    # Import tool modules to register them with @mcp.tool() decorators
-    from fle.env.protocols._mcp import tools
-    from fle.env.protocols._mcp import version_control
-    from fle.env.protocols._mcp import prompts
-    # Resources module has FastMCP version incompatibility, skip if it fails
-    try:
-        from fle.env.protocols._mcp import resources
-    except TypeError:
-        pass
-    from fle.env.protocols._mcp import mcp
-    mcp.run(transport="stdio")
-else:
-    from fle.run import main
-    main()
-PYTHONPATCH
-)
-
-# Run with the patch
-exec "$FLE_VENV/bin/python3" -c "$PATCH_SCRIPT" "$@"
-FLEWRAPPER
-
-    chmod +x "$SCRIPT_DIR/.venv/bin/fle"
-    FLE_CMD="$SCRIPT_DIR/.venv/bin/fle"
-    echo -e "${GREEN}FLE wrapper created${NC}"
-
-    # Pre-install dependencies so MCP server starts quickly
-    FLE_VENV="$HOME/.fle-venv"
-    if [ ! -d "$FLE_VENV" ] || [ ! -f "$FLE_VENV/bin/python3" ]; then
-        echo -e "${YELLOW}Installing dependencies (first time only, may take a minute)...${NC}"
-        python3 -m venv "$FLE_VENV"
-        "$FLE_VENV/bin/pip" install --quiet 'factorio-learning-environment[mcp,eval]' 'fastmcp<2.0' openai anthropic aiohttp
-        echo -e "${GREEN}Dependencies installed${NC}"
-    fi
-
-    return 0
 }
-
-if ! check_fle; then
-    install_fle || exit 1
-fi
 
 # Check for existing session
 if [ -f .claudetorio_session ]; then
@@ -182,6 +77,9 @@ if [ -f .claudetorio_session ]; then
     fi
 fi
 
+# Setup FLE before claiming session
+setup_fle
+
 # Get username
 echo ""
 read -p "Enter your username (lowercase, 2-20 chars): " USERNAME
@@ -196,41 +94,14 @@ fi
 echo ""
 echo "Checking for existing saves..."
 SAVES=$(curl -s "$SERVER/api/users/$USERNAME/saves" 2>/dev/null || echo '[]')
+SAVE_COUNT=$(echo "$SAVES" | jq 'length')
 
-# Check if response is actually an array (not an error object)
 SAVE_NAME=""
-if echo "$SAVES" | jq -e 'type == "array"' > /dev/null 2>&1; then
-    SAVE_COUNT=$(echo "$SAVES" | jq 'length')
-    if [ "$SAVE_COUNT" -gt "0" ]; then
-        echo -e "${GREEN}Found ${SAVE_COUNT} save(s):${NC}"
-        echo ""
-
-        # Display numbered list of saves
-        i=1
-        while read -r save_info; do
-            echo -e "  ${BLUE}[$i]${NC} $save_info"
-            i=$((i + 1))
-        done < <(echo "$SAVES" | jq -r '.[] | "\(.save_name) (score: \(.score_at_save // 0 | floor), \(.playtime_hours // 0 | floor)h played)"')
-
-        echo -e "  ${BLUE}[0]${NC} Start new game"
-        echo ""
-        read -p "Select save number (0 for new game): " SAVE_CHOICE
-
-        # Validate input and get save name
-        if [ -n "$SAVE_CHOICE" ] && [ "$SAVE_CHOICE" != "0" ]; then
-            # Check if input is a valid number
-            if [[ "$SAVE_CHOICE" =~ ^[0-9]+$ ]] && [ "$SAVE_CHOICE" -ge 1 ] && [ "$SAVE_CHOICE" -le "$SAVE_COUNT" ]; then
-                SAVE_NAME=$(echo "$SAVES" | jq -r ".[$((SAVE_CHOICE - 1))].save_name")
-                echo -e "${GREEN}Selected: ${SAVE_NAME}${NC}"
-            else
-                echo -e "${YELLOW}Invalid selection, starting new game${NC}"
-            fi
-        fi
-    else
-        echo "No existing saves found. Starting fresh!"
-    fi
-else
-    echo "No existing saves found. Starting fresh!"
+if [ "$SAVE_COUNT" -gt "0" ] && [ "$SAVE_COUNT" != "null" ]; then
+    echo -e "${GREEN}Found ${SAVE_COUNT} save(s):${NC}"
+    echo "$SAVES" | jq -r '.[] | "  -> \(.save_name) (score: \(.score_at_save | floor), \(.playtime_hours | floor)h played)"'
+    echo ""
+    read -p "Enter save name to resume (or press Enter for new game): " SAVE_NAME
 fi
 
 # Claim session
@@ -265,21 +136,31 @@ MCP_CONFIG=$(echo "$RESPONSE" | jq '.mcp_config')
 # Save session info
 echo "$SESSION_ID" > .claudetorio_session
 
-# Generate Claude Code MCP config with correct FLE path
+# Generate Claude Code MCP config - use .venv python
+# Update the MCP config to use the venv's python
+VENV_PYTHON="$(pwd)/.venv/bin/python"
+MCP_CONFIG=$(echo "$MCP_CONFIG" | jq --arg py "$VENV_PYTHON" '.mcpServers["factorio-fle"].command = $py')
+
 mkdir -p .claude
-
-# Rename server from "factorio" to "factorio-fle" for correct MCP tool naming
-MCP_CONFIG=$(echo "$MCP_CONFIG" | jq '.mcpServers["factorio-fle"] = .mcpServers.factorio | del(.mcpServers.factorio)')
-
-# Update the MCP config to use our FLE path if it's not the default 'fle'
-if [ "$FLE_CMD" != "fle" ]; then
-    MCP_CONFIG=$(echo "$MCP_CONFIG" | jq --arg cmd "$FLE_CMD" '.mcpServers["factorio-fle"].command = $cmd')
-fi
-
 echo "$MCP_CONFIG" > .claude/settings.json
 
 # Also create a standalone MCP config file
 echo "$MCP_CONFIG" > mcp-config.json
+
+# Test MCP server can import correctly
+echo ""
+echo -e "${YELLOW}Testing MCP server...${NC}"
+FLE_SERVER_HOST=$(echo "$MCP_CONFIG" | jq -r '.mcpServers["factorio-fle"].env.FLE_SERVER_HOST')
+FLE_RCON_PORT=$(echo "$MCP_CONFIG" | jq -r '.mcpServers["factorio-fle"].env.FLE_RCON_PORT')
+FLE_RCON_PASSWORD=$(echo "$MCP_CONFIG" | jq -r '.mcpServers["factorio-fle"].env.FLE_RCON_PASSWORD')
+
+export FLE_SERVER_HOST FLE_RCON_PORT FLE_RCON_PASSWORD
+if $VENV_PYTHON -c "from fle.env.protocols._mcp import mcp; print('MCP module loaded successfully')" 2>&1; then
+    echo -e "${GREEN}MCP server ready!${NC}"
+else
+    echo -e "${RED}MCP server failed to load. Try reinstalling:${NC}"
+    echo -e "  rm -rf .venv && ./connect.sh"
+fi
 
 echo ""
 echo -e "${GREEN}=============================================================${NC}"
@@ -298,11 +179,21 @@ echo -e "     2. Multiplayer -> Connect to address"
 echo -e "     3. Enter: ${GREEN}${SPECTATE_ADDR}${NC}"
 echo -e "${YELLOW}=============================================================${NC}"
 echo ""
-echo -e "${YELLOW}  LEADERBOARD: ${BLUE}${SERVER}${NC}"
-echo -e "${YELLOW}  TO SAVE & DISCONNECT: ${BLUE}./disconnect.sh${NC}"
+echo -e "${YELLOW}=============================================================${NC}"
+echo -e "${YELLOW}  TO START CLAUDE CODE:${NC}"
+echo -e "     claude --mcp-config mcp-config.json"
 echo ""
-
-# Auto-launch Claude Code with the MCP config
-echo -e "${GREEN}Launching Claude Code...${NC}"
+echo -e "     Or add to your Claude Code settings:"
+echo -e "     ${BLUE}$(cat mcp-config.json | jq -c)${NC}"
+echo -e "${YELLOW}=============================================================${NC}"
 echo ""
-exec claude --mcp-config mcp-config.json --dangerously-skip-permissions
+echo -e "${YELLOW}=============================================================${NC}"
+echo -e "${YELLOW}  LEADERBOARD:${NC}"
+echo -e "     ${BLUE}${SERVER}${NC}"
+echo -e "${YELLOW}=============================================================${NC}"
+echo ""
+echo -e "${YELLOW}=============================================================${NC}"
+echo -e "${YELLOW}  TO SAVE & DISCONNECT:${NC}"
+echo -e "     ./disconnect.sh"
+echo -e "${YELLOW}=============================================================${NC}"
+echo ""
